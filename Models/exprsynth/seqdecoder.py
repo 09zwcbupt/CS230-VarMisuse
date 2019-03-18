@@ -103,6 +103,7 @@ class SeqDecoder(object):
 
     def make_placeholders(self, is_train: bool) -> None:
         if is_train:
+            # tensorized correct answer
             self.placeholders['target_token_ids'] = \
                 tf.placeholder(dtype=tf.int32,
                                shape=(None, self.hyperparameters['decoder_max_target_length']),
@@ -144,6 +145,7 @@ class SeqDecoder(object):
             self.__make_test_model()
 
     def __make_test_model(self):
+        print( "====================== making test cases" )
         rnn_cell = make_rnn_cell(self.hyperparameters['decoder_rnn_layer_num'],
                                  self.hyperparameters['decoder_rnn_cell_type'],
                                  hidden_size=self.hyperparameters['decoder_rnn_hidden_size'],
@@ -151,6 +153,8 @@ class SeqDecoder(object):
                                  )
         cur_output_tok_embedded = tf.nn.embedding_lookup(params=self.parameters['decoder_token_embedding'],
                                                          ids=self.placeholders['rnn_input_tok_id'])
+        self.ops[ 'cur_output_tok_embedded' ] = cur_output_tok_embedded
+        self.ops[ 'rnn_hidden_state' ] = self.placeholders['rnn_hidden_state']
         rnn_cell_state = tuple([self.placeholders['rnn_hidden_state'][layer,:,:]
                                 for layer in range(self.hyperparameters['decoder_rnn_layer_num'])])
         cur_output, next_decoder_state = rnn_cell(cur_output_tok_embedded, rnn_cell_state)
@@ -158,80 +162,136 @@ class SeqDecoder(object):
         self.ops['one_rnn_decoder_step_state'] = next_decoder_state
 
     def __make_train_model(self):
-        rnn_cell = make_rnn_cell(self.hyperparameters['decoder_rnn_layer_num'],
-                                 self.hyperparameters['decoder_rnn_cell_type'],
-                                 hidden_size=self.hyperparameters['decoder_rnn_hidden_size'],
-                                 dropout_keep_rate=self.placeholders['dropout_keep_rate'],
-                                 )
-        initial_cell_state = self.__make_decoder_rnn_initial_state(self.ops['decoder_initial_state'], rnn_cell)
+        # use RNN to decode 
+        #rnn_cell = make_rnn_cell(self.hyperparameters['decoder_rnn_layer_num'],
+        #                         self.hyperparameters['decoder_rnn_cell_type'],
+        #                         hidden_size=self.hyperparameters['decoder_rnn_hidden_size'],
+        #                         dropout_keep_rate=self.placeholders['dropout_keep_rate'],
+        #                         )
+        # decoder_initial_state is the contexts for holes
+        # shape [ num_exp, 64 ]
+        #initial_cell_state = self.__make_decoder_rnn_initial_state(self.ops['decoder_initial_state'], rnn_cell)
 
+        # target: input is word embedding for var position:
+        #         output is the chosen var
         # Reorg data from [batch, time, emb_dim] to [time, batch, emb_dim], and build corresponding tensor array:
-        target_tokens_by_time = tf.transpose(self.placeholders['target_token_ids'], perm=[1, 0])
-        target_tokens_ta = tf.TensorArray(dtype=tf.int32,
-                                          size=self.hyperparameters['decoder_max_target_length'],
-                                          name="target_tokens_embedded_ta",
-                                          )
-        target_tokens_ta = target_tokens_ta.unstack(target_tokens_by_time)
+        #target_tokens_by_time = tf.transpose(self.placeholders['target_token_ids'], perm=[1, 0])
+        #target_tokens_ta = tf.TensorArray(dtype=tf.int32,
+        #                                  size=self.hyperparameters['decoder_max_target_length'],
+        #                                  name="target_tokens_embedded_ta",
+        #                                  )
+        #target_tokens_ta = target_tokens_ta.unstack(target_tokens_by_time)
 
         # First, initialise loop variables:
+        # starting at a wrong place?? looks like it is fine if the deminsion matches
         one_one_per_sample = tf.ones_like(self.placeholders['target_token_ids'][:,0])
-        initial_input = one_one_per_sample * self.metadata['decoder_token_vocab'].get_id_or_unk(START_TOKEN)
-        initial_input = tf.nn.embedding_lookup(self.parameters['decoder_token_embedding'], initial_input)
+        # [1] * num_of_exp
+        self.ops[ 'one_one_per_sample' ] = one_one_per_sample
+        initial_input0 = one_one_per_sample * self.metadata['decoder_token_vocab'].get_id_or_unk(START_TOKEN)
+        # for each exapmle, generate from start symbal
+        initial_input = tf.nn.embedding_lookup(self.parameters['decoder_token_embedding'], initial_input0)
         end_token = one_one_per_sample * self.metadata['decoder_token_vocab'].get_id_or_unk(END_TOKEN)
-        empty_output_logits_ta = tf.TensorArray(dtype=tf.float32,
-                                                size=self.hyperparameters['decoder_max_target_length'],
-                                                name="output_logits_ta",
-                                                )
+        #empty_output_logits_ta = tf.TensorArray(dtype=tf.float32,
+        #                                        size=self.hyperparameters['decoder_max_target_length'],
+        #                                        name="output_logits_ta",
+        #                                        )
 
-        def condition(time_unused, output_logits_ta_unused, decoder_state_unused, last_output_tok_embedded_unused, finished):
-            return tf.logical_not(tf.reduce_all(finished))
+        #def condition(time_unused, output_logits_ta_unused, decoder_state_unused, last_output_tok_embedded_unused, finished):
+        #    # reduce all: per-element and for all elem in finished
+        #    # logical_not: make it capable to control loop
+        #    return tf.logical_not(tf.reduce_all(finished))
 
-        def body(step, output_logits_ta, decoder_state, last_output_tok_embedded, finished):
-            next_step = step + 1
+        #def body(step, output_logits_ta, decoder_state, last_output_tok_embedded, finished):
+        #    next_step = step + 1
 
-            # Use the RNN to decode one more tok:
-            cur_output, next_decoder_state = rnn_cell(last_output_tok_embedded, decoder_state)
-            cur_rnn_output_logits = self.parameters['decoder_output_projection'](cur_output)
+        #    # Use the RNN to decode one more tok:
+        #    cur_output, next_decoder_state = rnn_cell(last_output_tok_embedded, decoder_state)
+        #    cur_rnn_output_logits = self.parameters['decoder_output_projection'](cur_output)
 
-            # Decide if we're done everywhere:
-            next_finished = tf.logical_or(finished, next_step >= self.hyperparameters['decoder_max_target_length'])
+        #    # Decide if we're done everywhere:
+        #    next_finished = tf.logical_or(finished, next_step >= self.hyperparameters['decoder_max_target_length'])
 
-            # Decide next token: If in training, use the next target token...
-            all_next_finished = tf.reduce_all(next_finished)
-            cur_output_tok = tf.cond(all_next_finished,
-                                     lambda: end_token,
-                                     lambda: target_tokens_ta.read(step))
+        #    # Decide next token: If in training, use the next target token...
+        #    all_next_finished = tf.reduce_all(next_finished)
+        #    cur_output_tok = tf.cond(all_next_finished,
+        #                             lambda: end_token,
+        #                             lambda: target_tokens_ta.read(step))
 
-            cur_output_tok_embedded = tf.nn.embedding_lookup(self.parameters['decoder_token_embedding'],
-                                                             cur_output_tok)
+        #    cur_output_tok_embedded = tf.nn.embedding_lookup(self.parameters['decoder_token_embedding'],
+        #                                                     cur_output_tok)
 
-            # Write out the collected wisdom:
-            output_logits_ta = output_logits_ta.write(step, cur_rnn_output_logits)
-            return (next_step, output_logits_ta, next_decoder_state, cur_output_tok_embedded, next_finished)
+        #    # Write out the collected wisdom:
+        #    output_logits_ta = output_logits_ta.write(step, cur_rnn_output_logits)
+        #    return (next_step, output_logits_ta, next_decoder_state, cur_output_tok_embedded, next_finished)
 
-        (_, final_output_logits_ta, _, _, _) = \
-            tf.while_loop(condition,
-                          body,
-                          loop_vars=[tf.constant(0, dtype=tf.int32),
-                                     empty_output_logits_ta,
-                                     initial_cell_state,
-                                     initial_input,
-                                     tf.zeros_like(self.placeholders['target_token_ids'][:,0], dtype=tf.bool),
-                                     ],
-                          parallel_iterations=1
-                          )
+        # Uses 2 layer GLU/LSTM RNN node
+        # both condition and body takes loop_vars as input
+        # and body returns the same arity and type as loop_vars
+        #(_, final_output_logits_ta, _, _, _) = \
+        #    tf.while_loop(condition,
+        #                  body,
+        #                  loop_vars=[tf.constant(0, dtype=tf.int32),
+        #                             empty_output_logits_ta,
+        #                             initial_cell_state,
+        #                             initial_input,
+        #                             tf.zeros_like(self.placeholders['target_token_ids'][:,0], dtype=tf.bool),
+        #                             ],
+        #                  parallel_iterations=1
+        #                  )
+ 
+        self.ops['initial_input'] = initial_input
+        self.ops['initial_input0'] = initial_input0
+        # try skip the while loop :)
+        # this would only train 1 step, which would for sure have a huge loss
+        #(_, final_output_logits_ta, _, _, _) = body( tf.constant(0, dtype=tf.int32), empty_output_logits_ta, initial_cell_state, \
+        #                                             initial_input, tf.zeros_like(self.placeholders['target_token_ids'][:,0], dtype=tf.bool) )
 
-        output_logits_by_time = final_output_logits_ta.stack()
-        self.ops['decoder_output_logits'] = tf.transpose(output_logits_by_time, perm=[1, 0, 2])
-        self.ops['decoder_output_probs'] = tf.nn.softmax(self.ops['decoder_output_logits'])
+        # put var embedding as init input
+        # output is if [exp count, vocab size] shape
+        # TODO: we don't need vocab size to be 3000?
+        final_output_logits_ta2 = \
+            tf.layers.dense(self.ops['decoder_initial_state'], # input embeddings
+                            units=self.hyperparameters['decoder_vocab_size'],
+                            use_bias=False,
+                            activation=None,
+                            kernel_initializer=tf.glorot_uniform_initializer(),
+                            name="varchoice_representation_to_logits",
+                            )  # Shape: [VP, num_variable_choices, 1]
+        #return tf.squeeze(varchoice_logits, axis=-1)  # Shape: [VP, num_variable_choices]
+        self.ops[ 'dense_output' ] = final_output_logits_ta2
+
+        #used for RNN
+        #output_logits_by_time = final_output_logits_ta.stack()
+        # reshape from [15, 3000] to [15, 1, 3000]
+        output_logits_by_time2 = tf.expand_dims(final_output_logits_ta2,1)
+        # self.ops[ 'output_logits_by_time' ] = output_logits_by_time
+        self.ops[ 'output_logits_by_time2' ] = output_logits_by_time2
+
+        # tranpose, and change dimentions to [15,20,3000] from [20, 3000, 15]
+        # 3000 is the max vocab size distribution?
+        # 20 is the target size
+        # 15 looks like the number of class
+        #self.ops['decoder_output_logits'] = tf.transpose(output_logits_by_time, perm=[1, 0, 2])
+        self.ops['decoder_output_logits2'] = output_logits_by_time2
+        self.ops['decoder_output_probs'] = tf.nn.softmax(self.ops['decoder_output_logits2'])
+        #self.ops['decoder_output_probs'] = tf.nn.softmax(self.ops['decoder_output_logits'])
+        # shape [15, 20], have the form of [start_token, ..., end_token]
+        self.ops[ 'target' ] = self.placeholders['target_token_ids']
+        self.ops[ 'target_mask' ] = self.placeholders['target_token_ids_mask']
 
         # Produce loss:
-        outputs_correct_crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.placeholders['target_token_ids'],
-                                                                                  logits=self.ops['decoder_output_logits'])
-        masked_outputs_correct_crossent = outputs_correct_crossent * self.placeholders['target_token_ids_mask']
+        # reshape target to [15,1], we only care the first generated val
+        den_correct = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tf.slice(self.placeholders['target_token_ids'], [0,0], [15,1]),
+                                                                     logits=self.ops['decoder_output_logits2'])
+        #outputs_correct_crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.placeholders['target_token_ids'],
+        #                                                                          logits=self.ops['decoder_output_logits'])
+        #outputs_correct_crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tf.constant([1]*15),
+        #                                                                          logits=self.ops['decoder_output_logits'])
+        #masked_outputs_correct_crossent = outputs_correct_crossent * self.placeholders['target_token_ids_mask']
 
 
-        decoder_loss = tf.reduce_sum(masked_outputs_correct_crossent)
+        #decoder_loss = tf.reduce_sum(masked_outputs_correct_crossent)
+        decoder_loss = tf.reduce_sum( den_correct )
         self.ops['log_probs'] = -decoder_loss
 
         # Normalize by batch size:
@@ -256,7 +316,7 @@ class SeqDecoder(object):
 
         final_metadata['decoder_token_vocab'] = \
             Vocabulary.create_vocabulary(merged_token_counter,
-                                         max_size=self.hyperparameters['decoder_vocab_size'] - 2)
+                                         max_size=self.hyperparameters['decoder_vocab_size'] - 2, count_threshold=1)
         final_metadata['decoder_token_vocab'].add_or_get_id(START_TOKEN)
         final_metadata['decoder_token_vocab'].add_or_get_id(END_TOKEN)
 
@@ -265,18 +325,33 @@ class SeqDecoder(object):
         prod_root_node = min(int(v) for v in raw_sample['Productions'].keys())
         sample_token_seq = []
         collect_token_seq(raw_sample, prod_root_node, sample_token_seq)
+        #import pprint
+        #pprint.pprint( raw_sample['Productions'] )
+        #pprint.pprint( raw_sample['SymbolLabels'] )
+        #print( "sample_token_seq:", sample_token_seq )
 
         max_len = hyperparameters['decoder_max_target_length']
         end_token_id = metadata['decoder_token_vocab'].get_id_or_unk(END_TOKEN)
         token_seq_tensorised = [metadata['decoder_token_vocab'].get_id_or_unk(token)
                                 for token in sample_token_seq[:max_len - 1]]
         token_seq_tensorised.append(end_token_id)
-        token_seq_mask = [1] * len(token_seq_tensorised)
-        padding_size = max_len - len(token_seq_tensorised)
-        token_seq_tensorised = token_seq_tensorised + [end_token_id] * padding_size
+        # HACK: only use one prediction
+        #token_seq_mask = [1] * len(token_seq_tensorised)
+        print( "=============================" )
+        print( "replace token mask to 1 " )
+        print( "=============================" )
+        #token_seq_mask = [1] * len(token_seq_tensorised)
+        token_seq_mask = [1] 
+        #padding_size = max_len - len(token_seq_tensorised)
+        padding_size = max_len - 1
+        # TODO: the first token is actually start token
+        #token_seq_tensorised = token_seq_tensorised + [end_token_id] * padding_size
+        token_seq_tensorised = token_seq_tensorised[:1] + [end_token_id] * padding_size
         assert all(0<=t<len(metadata['decoder_token_vocab']) for t in token_seq_tensorised)
         token_seq_mask = token_seq_mask + [0] * padding_size
 
+        print( "=============target token tensorized:", token_seq_tensorised )
+        print( "=============target token un-tensorized:", sample_token_seq[:max_len - 1] )
         result_holder['target_token_ids'] = np.array(token_seq_tensorised, dtype=np.int32)
         result_holder['target_token_ids_mask'] = np.array(token_seq_mask, dtype=np.int32)
         if not is_train:

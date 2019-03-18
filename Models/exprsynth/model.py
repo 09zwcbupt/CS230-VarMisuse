@@ -76,7 +76,7 @@ def make_data_file_parser(model_class: Type["Model"],
                 collect_token_seq(raw_sample, prod_root_node, sample_token_seq)
                 sample['NumTokensInExpression'] = len(sample_token_seq)
                 if len(raw_sample['VariableUsageContexts']) == 0:
-                    assert len(raw_sample['LastUseOfVariablesInScope']) == 0
+                    #assert len(raw_sample['LastUseOfVariablesInScope']) == 0
                     continue
                 use_example = model_class._load_data_from_sample(hyperparameters, metadata, raw_sample=raw_sample, result_holder=sample, is_train=not for_test)
                 if add_raw_data:
@@ -85,6 +85,22 @@ def make_data_file_parser(model_class: Type["Model"],
                 if use_example:
                     num_used_samples += 1
                     result_data.append(sample)
+                    import pprint
+                    print( "sample:     " )
+                    #pprint.pprint( sample.keys() )
+                    for i in list( sample.keys() ):
+                        val = sample[i]
+                        if isinstance( val, np.ndarray ):
+                            print(i, ": np.array of shape:", val.shape)
+                        elif isinstance( val, list ):
+                            print(i, ": list: ", len(val) )
+                        elif isinstance( val, dict ):
+                            print(i, ": dict of keys:", val.keys())
+                        
+                        else:
+                            print(i, val)
+                        
+                    print( "\n\n" )
         target_path.save_as_compressed_file(result_data)
         yield num_all_samples, num_used_samples
     return data_file_parser
@@ -127,6 +143,7 @@ class Model(ABC):
 
         graph = tf.Graph()
         self.__sess = tf.Session(graph=graph, config=config)
+        #self.__sess = tf.InteractiveSession(graph=graph, config=config)
 
     @property
     def metadata(self):
@@ -464,6 +481,8 @@ class Model(ABC):
                 open_new_chunk()  # will silently fail if we are out of chunks
 
             # Add sample to current minibatch. Yield and prepare fresh one if we are full now:
+            #import pdb
+            #pdb.set_trace()
             batch_finished = self._extend_minibatch_by_sample(cur_batch_data, cur_sample)
             if batch_finished:
                 samples_used_so_far += cur_batch_data['samples_in_batch']
@@ -478,6 +497,8 @@ class Model(ABC):
 
     def _data_to_minibatches(self, data: Union[List[RichPath], Dict[str, Any]], is_train: bool=False) \
             -> Iterable[Tuple[Dict[tf.Tensor, Any], int, int]]:
+        #import pdb
+        #pdb.set_trace()
         if isinstance(data, list):
             raw_batch_iterator = self.__raw_batches_from_chunks_iterator(data, is_train=is_train)
             for (idx, (raw_batch, samples_in_batch, samples_used_so_far)) in enumerate(raw_batch_iterator):
@@ -496,6 +517,9 @@ class Model(ABC):
     def __run_epoch_in_batches(self, data_chunk_paths: List[RichPath], epoch_name: str, is_train: bool, quiet: bool=False) -> float:
         epoch_loss = 0.0
         epoch_start = time.time()
+        import pdb
+        import sys
+        #pdb.set_trace()
         data_generator = self._data_to_minibatches(data_chunk_paths, is_train=is_train)
         samples_used_so_far = 0
         printed_one_line = False
@@ -507,10 +531,23 @@ class Model(ABC):
                       flush=True,
                       end="\r")
                 printed_one_line = True
+            #pdb.set_trace()
             ops_to_run = {'loss': self.__ops['loss']}
             if is_train:
+                # decoder_initial_state is the embeddings for our target words
+                for name in [ 'dense_output', 'initial_input', 'initial_input0',
+                              'one_one_per_sample', 'decoder_initial_state',
+                              'target', 'target_mask', 'output_logits_by_time2' ]:
+                   ops_to_run[ name ] = self.ops[ name ]
                 ops_to_run['train_step'] = self.__ops['train_step']
+            #else:
+            #    for name in [ 'cur_output_tok_embedded', 'rnn_hidden_state', ]:
+            #       ops_to_run[ name ] = self.ops[ name ]
+            # self.ops['decoder_output_logits'] and self.ops['decoder_output_probs'] are available here
             op_results = self.__sess.run(ops_to_run, feed_dict=batch_data_dict)
+            #print( op_results[ 'dense_output' ].shape )
+            #pdb.set_trace()
+            #print(self.ops['decoder_output_logits'].eval())
             assert not np.isnan(op_results['loss'])
 
             epoch_loss += op_results['loss'] * samples_in_batch
@@ -545,6 +582,8 @@ class Model(ABC):
                 best_val_loss = float("inf")
             no_improvement_counter = 0
             epoch_number = 0
+            print( train_data )
+            print( valid_data )
             while (epoch_number < self.hyperparameters['max_epochs']
                    and no_improvement_counter < self.hyperparameters['patience']):
                 self.train_log('==== Epoch %i ====' % (epoch_number,))

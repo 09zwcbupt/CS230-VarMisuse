@@ -72,12 +72,15 @@ class Graph2SeqModel(ContextGraphModel):
         final_metadata['nag_reserved_names'].add("<HOLE>")
         return final_metadata
 
+    # tensorize function
     @staticmethod
     def _load_data_from_sample(hyperparameters: Dict[str, Any],
                                metadata: Dict[str, Any],
                                raw_sample: Dict[str, Any],
                                result_holder: Dict[str, Any],
                                is_train: bool=True) -> bool:
+        #import pdb
+        #pdb.set_trace()
         keep_sample = super(Graph2SeqModel, Graph2SeqModel)._load_data_from_sample(hyperparameters, metadata, raw_sample, result_holder, is_train)
         if keep_sample:
             result_holder['root_hole_node_id'] = raw_sample['HoleNode']
@@ -99,7 +102,7 @@ class Graph2SeqModel(ContextGraphModel):
     def _finalise_minibatch(self, batch_data: Dict[str, Any], is_train: bool) -> Dict[tf.Tensor, Any]:
         minibatch = super()._finalise_minibatch(batch_data, is_train)
         write_to_minibatch(minibatch, self.placeholders['root_hole_node_id'], batch_data['root_hole_node_id'])
-        self._decoder_model.finalise_minibatch(batch_data, minibatch)
+        self._decoder_model.finalise_minibatch(batch_data, minibatch, is_train)
         return minibatch
 
     # ------- These are the bits that we only need for test-time:

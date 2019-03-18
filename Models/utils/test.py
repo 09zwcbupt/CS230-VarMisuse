@@ -99,9 +99,9 @@ def run_test(model_path: RichPath, test_data_path: RichPath, output_folder: str,
 
     test_jobs = [(model_path, test_hyper_overrides, output_folder, chunk_id, chunk_data_paths)
                  for chunk_id, chunk_data_paths in enumerate(chunkify(test_data_chunks, num_processes))]
-    with Pool(processes=num_processes) as pool:
-        num_samples, token_perplexities, correct_at_1, correct_at_5 = zip(*pool.starmap(test_on_raw_chunks, test_jobs))
-    # num_samples, token_perplexities, correct_at_1, correct_at_5 = zip(*[test_on_raw_chunks(*job) for job in test_jobs])
+    #with Pool(processes=num_processes) as pool:
+    #    num_samples, token_perplexities, correct_at_1, correct_at_5 = zip(*pool.starmap(test_on_raw_chunks, test_jobs))
+    num_samples, token_perplexities, correct_at_1, correct_at_5 = zip(*[test_on_raw_chunks(*job) for job in test_jobs])
 
     num_samples = sum(num_samples)
     token_perplexities = np.concatenate(token_perplexities, axis=0)

@@ -52,6 +52,8 @@ def run(arguments):
     model = model_class(hyperparameters, run_name=arguments.get('--run-name'))
 
     metadata_to_use = arguments.get('--metadata-to-use', None)
+    import pdb
+    pdb.set_trace()
     if metadata_to_use is None:
         train_folder = input_folders[0]
         model.load_metadata(train_folder, type_lattice_file, max_num_files=int(arguments['--max-num-files']))

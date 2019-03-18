@@ -70,7 +70,8 @@ class ContextGraphModel(Model):
 
                         'cg_node_type_vocab_size': 5000,
                         'cg_node_type_max_num': 10,
-                        'cg_node_type_embedding_size': 32,
+                        'cg_node_type_embedding_size': 0,
+                        #'cg_node_type_embedding_size': 32,
 
                         "cg_ggnn_layer_timesteps": [3, 1, 3, 1],
                         "cg_ggnn_residual_connections": {"1": [0], "3": [0, 1]},
@@ -99,6 +100,7 @@ class ContextGraphModel(Model):
         if self.hyperparameters['cg_node_label_embedding_style'].lower() == 'token':
             self.placeholders['cg_node_label_token_ids'] = \
                 tf.placeholder(dtype=tf.int32, shape=[None], name='cg_node_label_token_ids')
+            print( " ==========================make placeholder in cgmodel, with id: ", id(self.placeholders['cg_node_label_token_ids']), self.placeholders['cg_node_label_token_ids'] )
         elif self.hyperparameters['cg_node_label_embedding_style'].lower() == 'charcnn':
             self.placeholders['cg_unique_label_chars'] = \
                 tf.placeholder(dtype=tf.int32,
@@ -163,6 +165,7 @@ class ContextGraphModel(Model):
                 initial_cg_node_embeddings.append(
                     self.__get_node_label_token_embeddings(
                         self.placeholders['cg_node_label_token_ids']))
+                print( " =======================using placeholder in cgmodel name_model, with id: ", id(self.placeholders['cg_node_label_token_ids']), self.placeholders['cg_node_label_token_ids'] )
             elif self.hyperparameters['cg_node_label_embedding_style'].lower() == 'charcnn':
                 initial_cg_node_embeddings.append(
                     self.__get_node_label_charcnn_embeddings(
@@ -178,10 +181,12 @@ class ContextGraphModel(Model):
                                                     self.placeholders['cg_node_type_ids_mask']))
 
             initial_cg_node_embeddings = tf.concat(initial_cg_node_embeddings, axis=-1)
+            # fully connected layer
             initial_node_states = tf.layers.dense(initial_cg_node_embeddings,
                                                   units=self.hyperparameters['cg_ggnn_hidden_size'],
                                                   use_bias=False,
                                                   activation=None)
+            # apply dropout
             initial_node_states = tf.nn.dropout(initial_node_states,
                                                 self.placeholders['dropout_keep_rate'])
 
@@ -214,6 +219,7 @@ class ContextGraphModel(Model):
         # Make unused type IDs /really/ small for reduce_max:
         node_type_embeddings += (1.0 - tf.expand_dims(node_type_ids_mask, axis=-1)) * -BIG_NUMBER
         node_type_embeddings = tf.reduce_max(node_type_embeddings, axis=1)  # v x D'
+        print( "================================type of cg_node_type_embeddings is:",type(node_type_embeddings), node_type_embeddings.shape)
         return node_type_embeddings
 
     def __get_node_label_token_embeddings(self,
@@ -222,7 +228,9 @@ class ContextGraphModel(Model):
         :param node_label_token_ids: Tensor of shape [V] representing label of each node (identified by ID into label vocab).
         :return: Tensor of shape [V, D] representing embedded node label information about each node.
         """
-        return tf.nn.embedding_lookup(self.parameters['cg_node_label_embeddings'], node_label_token_ids)
+        ret = tf.nn.embedding_lookup(self.parameters['cg_node_label_embeddings'], node_label_token_ids)
+        print( "================================type of cg_node_label_embeddings is:",type(ret), ret.shape)
+        return ret
 
     def __get_node_label_charcnn_embeddings(self,
                                             unique_label_chars: tf.Tensor,
@@ -316,6 +324,9 @@ class ContextGraphModel(Model):
         all_used_cg_edges = list(merged_edge_types - set(self.hyperparameters['excluded_cg_edge_types']))
         if self.hyperparameters.get('cg_add_subtoken_nodes', False):
             all_used_cg_edges.append(USES_SUBTOKEN_EDGE_NAME)
+        print( "==================================================================" )
+        print( all_used_cg_edges )
+        print( "==================================================================" )
         final_metadata['cg_edge_type_dict'] = {e: i for i, e in enumerate(all_used_cg_edges)}
 
         # Store token, type, and production vocabs:
@@ -344,6 +355,8 @@ class ContextGraphModel(Model):
                                              raw_sample: Dict[str, Any], result_holder: Dict[str, Any],
                                              is_train: bool=True) \
             -> bool:
+        #import pdb
+        #pdb.set_trace()
         if hyperparameters.get('cg_add_subtoken_nodes', False):
             _add_per_subtoken_nodes(metadata['nag_reserved_names'], raw_sample)
         graph_node_labels = raw_sample['ContextGraph']['NodeLabels']
@@ -354,10 +367,12 @@ class ContextGraphModel(Model):
             return False
 
         # Translate node label, either using the token vocab or into a character representation:
+        print( "contextgraphmodel.py: ", hyperparameters['cg_node_label_embedding_style'] )
         if hyperparameters['cg_node_label_embedding_style'].lower() == 'token':
             # Translate node labels using the token vocabulary:
             node_labels = np.zeros((num_nodes,), dtype=np.uint16)
             for (node, label) in graph_node_labels.items():
+                # node label id to vocab id
                 node_labels[int(node)] = metadata['cg_node_label_vocab'].get_id_or_unk(label)
             result_holder['cg_node_label_token_ids'] = node_labels
         elif hyperparameters['cg_node_label_embedding_style'].lower() == 'charcnn':
