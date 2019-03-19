@@ -227,6 +227,7 @@ class Model(ABC):
     @abstractmethod
     def _make_placeholders(self, is_train: bool) -> None:
         self.__placeholders['batch_size'] = tf.placeholder(tf.int32, shape=(), name="batch_size")
+        self.__placeholders['var_count'] = tf.placeholder(tf.int32, shape=(), name="var_count" )
         self.__placeholders['dropout_keep_rate'] = tf.placeholder(tf.float32, shape=(), name='dropout_keep_rate')
 
     @abstractmethod
@@ -502,8 +503,12 @@ class Model(ABC):
         if isinstance(data, list):
             raw_batch_iterator = self.__raw_batches_from_chunks_iterator(data, is_train=is_train)
             for (idx, (raw_batch, samples_in_batch, samples_used_so_far)) in enumerate(raw_batch_iterator):
-                minibatch = self._finalise_minibatch(raw_batch, is_train)
+                minibatch, var_count = self._finalise_minibatch(raw_batch, is_train)
                 minibatch[self.__placeholders['batch_size']] = samples_in_batch
+                # this is only set in seqdecoder.py
+                #import pdb
+                #pdb.set_trace()
+                minibatch[ self.__placeholders[ 'var_count' ] ] = var_count
                 yield (minibatch, samples_in_batch, samples_used_so_far)
         else:
             batch_data = {}
@@ -535,11 +540,14 @@ class Model(ABC):
             ops_to_run = {'loss': self.__ops['loss']}
             if is_train:
                 # decoder_initial_state is the embeddings for our target words
-                for name in [ 'dense_output', 'initial_input', 'initial_input0',
-                              'one_one_per_sample', 'decoder_initial_state',
-                              'target', 'target_mask', 'output_logits_by_time2' ]:
+                for name in [ 'initial_input', 'initial_input0',
+                              'one_one_per_sample', 'decoder_output_probs',
+                              'dense_var_output', 'var_embeddings', 'target_var_pos',
+                              'root_hole_ids', 'decoder_embedding', 'cg_node_representations',
+                               ]:
                    ops_to_run[ name ] = self.ops[ name ]
                 ops_to_run['train_step'] = self.__ops['train_step']
+                # check 'target_var_ids' and output of
             #else:
             #    for name in [ 'cur_output_tok_embedded', 'rnn_hidden_state', ]:
             #       ops_to_run[ name ] = self.ops[ name ]

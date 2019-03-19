@@ -46,13 +46,25 @@ class Graph2SeqModel(ContextGraphModel):
     def _make_model(self, is_train: bool=True):
         super()._make_model(is_train)
 
+        # original code
         # Gather up CG node representations for the hole nodes:
+        self.ops['root_hole_ids']=self.placeholders['root_hole_node_id']
         eg_node_representations_from_cg = tf.gather(params=self.ops['cg_node_representations'],
                                                     indices=self.placeholders['root_hole_node_id'])
         # Linear layer to uncouple the latent space and dimensionality of CG and decoder:
+        self.ops[ 'decoder_embedding' ] = eg_node_representations_from_cg
         self.ops['decoder_initial_state'] = tf.matmul(eg_node_representations_from_cg,
                                                       self.parameters['cg_representation_to_dec_hidden'])
 
+        # additional code for var misuse
+        self.ops['target_var_pos'] = self.placeholders['target_var_positions']
+        var_representations_from_cg = tf.gather( params=self.ops['cg_node_representations'],
+                                                 indices=self.placeholders['target_var_positions'] )
+        # TODO: why we need this?
+        self.ops[ 'rnn_hidden' ] = self.parameters['cg_representation_to_dec_hidden']
+        #self.ops['var_embeddings'] = tf.matmul( eg_node_representations_from_cg,
+        #                                        self.parameters['cg_representation_to_dec_hidden'])
+        self.ops['var_embeddings'] = var_representations_from_cg
         self._decoder_model.make_model(is_train)
 
     @staticmethod
@@ -102,8 +114,8 @@ class Graph2SeqModel(ContextGraphModel):
     def _finalise_minibatch(self, batch_data: Dict[str, Any], is_train: bool) -> Dict[tf.Tensor, Any]:
         minibatch = super()._finalise_minibatch(batch_data, is_train)
         write_to_minibatch(minibatch, self.placeholders['root_hole_node_id'], batch_data['root_hole_node_id'])
-        self._decoder_model.finalise_minibatch(batch_data, minibatch, is_train)
-        return minibatch
+        var_count = self._decoder_model.finalise_minibatch(batch_data, minibatch, is_train)
+        return minibatch, var_count
 
     # ------- These are the bits that we only need for test-time:
     def _encode_one_test_sample(self, sample_data_dict: Dict[tf.Tensor, Any]) -> Tuple[tf.Tensor, Optional[tf.Tensor]]:
