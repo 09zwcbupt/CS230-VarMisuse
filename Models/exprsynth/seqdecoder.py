@@ -103,6 +103,7 @@ class SeqDecoder(object):
 
     def make_placeholders(self, is_train: bool) -> None:
         if is_train:
+            # original code
             # tensorized correct answer
             self.placeholders['target_token_ids'] = \
                 tf.placeholder(dtype=tf.int32,
@@ -113,6 +114,17 @@ class SeqDecoder(object):
                 tf.placeholder(dtype=tf.float32,
                                shape=(None, self.hyperparameters['decoder_max_target_length']),
                                name="target_token_ids_mask")
+
+            # additional code for var misuse
+            self.placeholders['target_var_ids'] = \
+                tf.placeholder(dtype=tf.int32,
+                               shape=(None,),
+                               name="target_var_ids")
+
+            self.placeholders['target_var_positions'] = \
+                tf.placeholder(dtype=tf.float32,
+                               shape=(None,),
+                               name="target_var_positions")
         else:
             self.placeholders['rnn_hidden_state'] = \
                 tf.placeholder(dtype=tf.float32,
@@ -281,7 +293,7 @@ class SeqDecoder(object):
 
         # Produce loss:
         # reshape target to [15,1], we only care the first generated val
-        den_correct = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tf.slice(self.placeholders['target_token_ids'], [0,0], [15,1]),
+        den_correct = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tf.slice(self.placeholders['target_token_ids'], [0,0], [self.placeholders['batch_size'],1]),
                                                                      logits=self.ops['decoder_output_logits2'])
         #outputs_correct_crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.placeholders['target_token_ids'],
         #                                                                          logits=self.ops['decoder_output_logits'])
@@ -299,16 +311,27 @@ class SeqDecoder(object):
 
     @staticmethod
     def init_metadata(raw_metadata: Dict[str, Any]) -> None:
+        # original code
         raw_metadata['decoder_token_counter'] = Counter()
+
+        # additional code to process var occurrence
+        raw_metadata[ 'var_name_counter' ] = Counter()
 
     @staticmethod
     def load_metadata_from_sample(raw_sample: Dict[str, Any], raw_metadata: Dict[str, Any]) -> None:
+        # original code
         symbol_id_to_label = raw_sample['SymbolLabels']
 
         for symbol_label in symbol_id_to_label.values():
             raw_metadata['decoder_token_counter'][symbol_label] += 1
 
+        # addtional code to process var occurrence
+        var_name_to_id = raw_sample[ 'VariableOccurence' ]
+        for name in var_name_to_id:
+            raw_metadata[ 'var_name_counter' ][ name ] += len( var_name_to_id[ name ] )
+
     def finalise_metadata(self, raw_metadata_list: List[Dict[str, Any]], final_metadata: Dict[str, Any]) -> None:
+        # original code
         # First, merge all needed information:
         merged_token_counter = Counter()
         for raw_metadata in raw_metadata_list:
@@ -320,8 +343,18 @@ class SeqDecoder(object):
         final_metadata['decoder_token_vocab'].add_or_get_id(START_TOKEN)
         final_metadata['decoder_token_vocab'].add_or_get_id(END_TOKEN)
 
+        # addtional code to process var occurrence
+        merged_var_counter = Counter()
+        for raw_metadata in raw_metadata_list:
+            merged_var_counter += raw_metadata[ 'var_name_counter' ]
+        final_metadata[ 'var_occurrence_vocab' ] = \
+            Vocabulary.create_vocabulary( merged_var_counter,
+                                          max_size=self.hyperparameters[ 'decoder_vocab_size'] )
+        print( "TOTAL VARIABLE VOCAB SIZE: ", len( final_metadata[ 'var_occurrence_vocab' ].id_to_token ) )
+
     @staticmethod
     def load_data_from_sample(hyperparameters: Dict[str, Any], metadata: Dict[str, Any], raw_sample: Dict[str, Any], result_holder: Dict[str, Any], is_train: bool=True) -> None:
+        # original code
         prod_root_node = min(int(v) for v in raw_sample['Productions'].keys())
         sample_token_seq = []
         collect_token_seq(raw_sample, prod_root_node, sample_token_seq)
@@ -357,17 +390,60 @@ class SeqDecoder(object):
         if not is_train:
             result_holder['target_tokens'] = sample_token_seq
 
+        # additional code to handle var occurrence
+        # Here for convenience, just put all the node as well as name in 2 sequence
+        var_name_tensorized = [] # this is the answer, represented in vocab_id
+        var_position_tensorized = [] # this is the token id, which should be used to fetch embedding
+        var_occurence = raw_sample[ 'VariableOccurence' ]
+        for var_name in var_occurence:
+            vocab_id = metadata['var_occurrence_vocab'].get_id_or_unk( var_name ) 
+            var_name_tensorized += [ vocab_id ] * len( var_occurence[ var_name ] )
+            var_position_tensorized += var_occurence[ var_name ]
+
+        result_holder[ 'target_var_ids' ] = np.array( var_name_tensorized, dtype=np.int32 )
+        result_holder[ 'target_var_positions' ] = np.array( var_position_tensorized, dtype=np.int32 )
+        
     def init_minibatch(self, batch_data: Dict[str, Any]) -> None:
+        # original code
         batch_data['target_token_ids'] = []
         batch_data['target_token_ids_mask'] = []
 
+        # additional for var misuse
+        batch_data[ 'target_var_ids' ] = np.array([])
+        batch_data[ 'target_var_positions' ] = np.array([])
+
+    # fetching this function from contextgraphmodel
+    def _get_number_of_nodes_in_graph(self, sample: Dict[str, Any]) -> int:
+        if self.hyperparameters['cg_node_label_embedding_style'].lower() == 'token':
+            return len(sample['cg_node_label_token_ids'])
+        elif self.hyperparameters['cg_node_label_embedding_style'].lower() == 'charcnn':
+            return len(sample['cg_node_label_unique_indices'])
+        else:
+            raise Exception("Unknown node label embedding style '%s'!"
+                            % self.hyperparameters['cg_node_label_embedding_style'])
+
     def extend_minibatch_by_sample(self, batch_data: Dict[str, Any], sample: Dict[str, Any]) -> None:
+        # original code
         batch_data['target_token_ids'].append(sample['target_token_ids'])
         batch_data['target_token_ids_mask'].append(sample['target_token_ids_mask'])
 
+        # additional for var misuse
+        original_cg_node_offset = batch_data['cg_node_offset'] - self._get_number_of_nodes_in_graph(sample)
+        batch_data[ 'target_var_ids' ] = np.concatenate( ( batch_data[ 'target_var_ids' ], sample[ 'target_var_ids' ] ) )
+        batch_data[ 'target_var_positions' ] = np.concatenate( ( batch_data[ 'target_var_positions' ],
+                                                                 sample[ 'target_var_positions' ] + original_cg_node_offset ) )
+
     def finalise_minibatch(self, batch_data: Dict[str, Any], minibatch: Dict[tf.Tensor, Any], is_train: bool) -> None:
+        # original code
         write_to_minibatch(minibatch, self.placeholders['target_token_ids'], batch_data['target_token_ids'])
         write_to_minibatch(minibatch, self.placeholders['target_token_ids_mask'], batch_data['target_token_ids_mask'])
+
+        # additional for var misuse
+        write_to_minibatch( minibatch, self.placeholders['target_var_ids'], batch_data['target_var_ids'] )
+        write_to_minibatch( minibatch, self.placeholders['target_var_positions'], batch_data['target_var_positions'] )
+        #import pdb
+        #pdb.set_trace()
+        
 
     def generate_suggestions_for_one_sample(self,
                                             test_sample: Dict[str, Any],
