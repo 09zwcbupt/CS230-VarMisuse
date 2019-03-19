@@ -48,23 +48,23 @@ class Graph2SeqModel(ContextGraphModel):
 
         # original code
         # Gather up CG node representations for the hole nodes:
-        self.ops['root_hole_ids']=self.placeholders['root_hole_node_id']
-        eg_node_representations_from_cg = tf.gather(params=self.ops['cg_node_representations'],
-                                                    indices=self.placeholders['root_hole_node_id'])
+        #self.ops['root_hole_ids']=self.placeholders['root_hole_node_id']
+        #eg_node_representations_from_cg = tf.gather(params=self.ops['cg_node_representations'],
+        #                                            indices=self.placeholders['root_hole_node_id'])
         # Linear layer to uncouple the latent space and dimensionality of CG and decoder:
-        self.ops[ 'decoder_embedding' ] = eg_node_representations_from_cg
-        self.ops['decoder_initial_state'] = tf.matmul(eg_node_representations_from_cg,
-                                                      self.parameters['cg_representation_to_dec_hidden'])
+        #self.ops[ 'decoder_embedding' ] = eg_node_representations_from_cg
+        #self.ops['decoder_initial_state'] = tf.matmul(eg_node_representations_from_cg,
+        #                                              self.parameters['cg_representation_to_dec_hidden'])
 
         # additional code for var misuse
-        self.ops['target_var_pos'] = self.placeholders['target_var_positions']
+        self.ops[ 'target_var_pos' ] = self.placeholders[ 'target_var_positions' ]
         var_representations_from_cg = tf.gather( params=self.ops['cg_node_representations'],
                                                  indices=self.placeholders['target_var_positions'] )
         # TODO: why we need this?
         self.ops[ 'rnn_hidden' ] = self.parameters['cg_representation_to_dec_hidden']
         #self.ops['var_embeddings'] = tf.matmul( eg_node_representations_from_cg,
         #                                        self.parameters['cg_representation_to_dec_hidden'])
-        self.ops['var_embeddings'] = var_representations_from_cg
+        self.ops[ 'var_embeddings' ] = var_representations_from_cg
         self._decoder_model.make_model(is_train)
 
     @staticmethod

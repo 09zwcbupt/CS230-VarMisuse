@@ -540,21 +540,47 @@ class Model(ABC):
             ops_to_run = {'loss': self.__ops['loss']}
             if is_train:
                 # decoder_initial_state is the embeddings for our target words
-                for name in [ 'initial_input', 'initial_input0',
-                              'one_one_per_sample', 'decoder_output_probs',
+                for name in [ 'decoder_output_probs', 'answer',
                               'dense_var_output', 'var_embeddings', 'target_var_pos',
-                              'root_hole_ids', 'decoder_embedding', 'cg_node_representations',
+                              'cg_node_representations',
                                ]:
                    ops_to_run[ name ] = self.ops[ name ]
                 ops_to_run['train_step'] = self.__ops['train_step']
-                # check 'target_var_ids' and output of
+                # check op_results[ 'answer' ] => vocab id (target_var_id)
+                #      using self.metadata[ 'var_occurrence_vocab' ]
+                # check op_results[ 'target_var_pos' ] => node id in minibatch text
+                #      translates to batch_data_dict[ cg_node_label_token_ids ]
+                #         key = list(batch_data_dict.keys())[1] # cg_node_label_token_ids
+                #         
+                #      using self.metadata[ 'cg_node_label_vocab' ]
+                # check 'cg_node_label_token_ids' => vocab id for all text in batch???
+
             #else:
             #    for name in [ 'cur_output_tok_embedded', 'rnn_hidden_state', ]:
             #       ops_to_run[ name ] = self.ops[ name ]
             # self.ops['decoder_output_logits'] and self.ops['decoder_output_probs'] are available here
             op_results = self.__sess.run(ops_to_run, feed_dict=batch_data_dict)
             #print( op_results[ 'dense_output' ].shape )
-            #pdb.set_trace()
+
+            # test and see if input val are consistent 
+            key = list(batch_data_dict.keys())[ 1 ]
+            nodes = batch_data_dict[key]
+            def testFunc( index ):
+                var_vocab_id = op_results[ 'answer' ][ index ]
+                var_name = self.metadata[ 'var_occurrence_vocab' ].get_name_for_id( var_vocab_id )
+
+                token_index_in_batch = op_results[ 'target_var_pos' ][ index ]
+
+                token_vocab_id = nodes[ token_index_in_batch ]
+                var_name_in_batch = self.metadata[ 'cg_node_label_vocab' ].get_name_for_id( token_vocab_id )
+                if var_name not in var_name_in_batch:
+                    print(index, var_name, var_name_in_batch)
+            test = False
+            if test:
+            for i in range(1000):
+                testFunc(i)
+
+            pdb.set_trace()
             #print(self.ops['decoder_output_logits'].eval())
             assert not np.isnan(op_results['loss'])
 

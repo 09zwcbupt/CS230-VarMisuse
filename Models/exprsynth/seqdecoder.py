@@ -176,39 +176,36 @@ class SeqDecoder(object):
     def __make_train_model(self):
         # First, initialise loop variables:
         # starting at a wrong place?? looks like it is fine if the deminsion matches
-        one_one_per_sample = tf.ones_like(self.placeholders['target_token_ids'][:,0])
+        #one_one_per_sample = tf.ones_like(self.placeholders['target_token_ids'][:,0])
         # [1] * num_of_exp
-        self.ops[ 'one_one_per_sample' ] = one_one_per_sample
-        initial_input0 = one_one_per_sample * self.metadata['decoder_token_vocab'].get_id_or_unk(START_TOKEN)
+        #self.ops[ 'one_one_per_sample' ] = one_one_per_sample
+        #initial_input0 = one_one_per_sample * self.metadata['decoder_token_vocab'].get_id_or_unk(START_TOKEN)
         # for each exapmle, generate from start symbal
-        initial_input = tf.nn.embedding_lookup(self.parameters['decoder_token_embedding'], initial_input0)
-        end_token = one_one_per_sample * self.metadata['decoder_token_vocab'].get_id_or_unk(END_TOKEN)
-
-        self.ops['initial_input'] = initial_input
-        self.ops['initial_input0'] = initial_input0
+        #initial_input = tf.nn.embedding_lookup(self.parameters['decoder_token_embedding'], initial_input0)
+        #end_token = one_one_per_sample * self.metadata['decoder_token_vocab'].get_id_or_unk(END_TOKEN)
 
         # put var embedding as init input
         # output is if [exp count, vocab size] shape
         # TODO: we don't need vocab size to be 3000?
         final_output_logits_ta = \
-            tf.layers.dense(self.ops['var_embeddings'], # input embeddings
-                            units=self.hyperparameters['decoder_vocab_size'],
-                            use_bias=False,
-                            activation=None,
-                            kernel_initializer=tf.glorot_uniform_initializer(),
-                            name="var_misuse_representation_to_logits",
-                            ) 
+            tf.layers.dense( self.ops[ 'var_embeddings' ], # input embeddings
+                             units=self.hyperparameters[ 'decoder_vocab_size' ],
+                             # consider using softmac as activation TODO: fix units to vocab size!!
+                             use_bias=False, activation=None,
+                             kernel_initializer=tf.glorot_uniform_initializer(),
+                             name="var_misuse_representation_to_logits" ) 
 
         # final output, shape [ exp, 3000 ]
         self.ops[ 'dense_var_output' ] = final_output_logits_ta
-
-        # TODO: how to use this?
+        # debugging
+        self.ops[ 'answer' ] = self.placeholders[ 'target_var_ids' ]
         self.ops[ 'decoder_output_probs' ] = tf.nn.softmax( final_output_logits_ta )
 
         # Produce loss:
         var_correct = tf.nn.sparse_softmax_cross_entropy_with_logits( labels=self.placeholders[ 'target_var_ids' ],
                                                                       logits=self.ops[ 'dense_var_output' ] )
 
+ 
         decoder_loss = tf.reduce_sum( var_correct )
         self.ops['log_probs'] = -decoder_loss
 
