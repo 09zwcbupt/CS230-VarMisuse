@@ -85,22 +85,22 @@ def make_data_file_parser(model_class: Type["Model"],
                 if use_example:
                     num_used_samples += 1
                     result_data.append(sample)
-                    import pprint
-                    print( "sample:     " )
+                    #import pprint
+                    #print( "sample:     " )
                     #pprint.pprint( sample.keys() )
-                    for i in list( sample.keys() ):
-                        val = sample[i]
-                        if isinstance( val, np.ndarray ):
-                            print(i, ": np.array of shape:", val.shape)
-                        elif isinstance( val, list ):
-                            print(i, ": list: ", len(val) )
-                        elif isinstance( val, dict ):
-                            print(i, ": dict of keys:", val.keys())
-                        
-                        else:
-                            print(i, val)
-                        
-                    print( "\n\n" )
+                    #for i in list( sample.keys() ):
+                    #    val = sample[i]
+                    #    if isinstance( val, np.ndarray ):
+                    #        print(i, ": np.array of shape:", val.shape)
+                    #    elif isinstance( val, list ):
+                    #        print(i, ": list: ", len(val) )
+                    #    elif isinstance( val, dict ):
+                    #        print(i, ": dict of keys:", val.keys())
+                    #    
+                    #    else:
+                    #        print(i, val)
+                    #    
+                    #print( "\n\n" )
         target_path.save_as_compressed_file(result_data)
         yield num_all_samples, num_used_samples
     return data_file_parser
@@ -528,23 +528,22 @@ class Model(ABC):
         data_generator = self._data_to_minibatches(data_chunk_paths, is_train=is_train)
         samples_used_so_far = 0
         printed_one_line = False
+        per_batch_accuracy = []
+        total_example = 0
+        total_correct = 0
+        last_sample_size = 0
         for minibatch_counter, (batch_data_dict, samples_in_batch, samples_used_so_far) in enumerate(data_generator):
             if not quiet or (minibatch_counter % 100) == 0:
-                print("%s: Batch %5i (has %i samples). Processed %i samples. Loss so far: %.4f.   "
-                      % (epoch_name, minibatch_counter, samples_in_batch,
-                         samples_used_so_far - samples_in_batch, epoch_loss / max(1, samples_used_so_far),),
-                      flush=True,
-                      end="\r")
+                print("%s: Batch %5i (has %i files, %i samples). Processed %i files %i samples. accuracy %.4f%s Loss so far: %.4f.   "
+                      % (epoch_name, minibatch_counter, samples_in_batch, last_sample_size,
+                         samples_used_so_far - samples_in_batch, total_example,
+                         ( 100.0 * total_correct/max(1, total_example )), "%",epoch_loss / max(1, samples_used_so_far),),
+                      flush=True )
+                #      end="\r")
                 printed_one_line = True
-            #pdb.set_trace()
             ops_to_run = {'loss': self.__ops['loss']}
             if is_train:
                 # decoder_initial_state is the embeddings for our target words
-                for name in [ 'decoder_output_probs', 'answer',
-                              'dense_var_output', 'var_embeddings', 'target_var_pos',
-                              'cg_node_representations',
-                               ]:
-                   ops_to_run[ name ] = self.ops[ name ]
                 ops_to_run['train_step'] = self.__ops['train_step']
                 # check op_results[ 'answer' ] => vocab id (target_var_id)
                 #      using self.metadata[ 'var_occurrence_vocab' ]
@@ -559,8 +558,22 @@ class Model(ABC):
             #    for name in [ 'cur_output_tok_embedded', 'rnn_hidden_state', ]:
             #       ops_to_run[ name ] = self.ops[ name ]
             # self.ops['decoder_output_logits'] and self.ops['decoder_output_probs'] are available here
+            # fetch results to calculate accuracy
+            for name in [ 'predictions', 'answer' ]:
+                ops_to_run[ name ] = self.ops[ name ]
             op_results = self.__sess.run(ops_to_run, feed_dict=batch_data_dict)
             #print( op_results[ 'dense_output' ].shape )
+            #import pdb
+            #pdb.set_trace()
+            predictions = np.argmax( op_results[ 'predictions' ], axis=1)
+            assert predictions.shape == op_results[ 'answer' ].shape
+            same = predictions == op_results[ 'answer' ]
+            correct = np.sum( same )
+            accuracy = 1.0 * correct / same.shape[ 0 ]
+            last_sample_size = same.shape[ 0 ]
+            total_example += last_sample_size
+            total_correct += correct
+            per_batch_accuracy.append( "%.2f" % accuracy + "%" )
 
             # test and see if input val are consistent 
             key = list(batch_data_dict.keys())[ 1 ]
@@ -577,21 +590,24 @@ class Model(ABC):
                     print(index, var_name, var_name_in_batch)
             test = False
             if test:
-            for i in range(1000):
-                testFunc(i)
+               for i in range(1000):
+                   testFunc(i)
 
-            pdb.set_trace()
-            #print(self.ops['decoder_output_logits'].eval())
             assert not np.isnan(op_results['loss'])
 
-            epoch_loss += op_results['loss'] * samples_in_batch
+            epoch_loss += op_results['loss'] * same.shape[ 0 ]
             minibatch_counter += 1
         used_time = time.time() - epoch_start
         if printed_one_line:
             print("\r\x1b[K", end='')
-        self.train_log("  Epoch %s took %.2fs [processed %s samples/second]"
+        self.train_log("  Epoch %s took %.2fs [processed %s files/second]"
                        % (epoch_name, used_time, int(samples_used_so_far/used_time)))
         epoch_loss = epoch_loss / samples_used_so_far
+        result = "test"
+        if is_train:
+            result = "training"
+        print( result, "accuracy: ", "%.2f" % ( 1.0 * total_correct / total_example * 100 ), "%" )
+        print( per_batch_accuracy )
 
         return epoch_loss
 

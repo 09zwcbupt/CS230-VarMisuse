@@ -198,8 +198,8 @@ class SeqDecoder(object):
         # final output, shape [ exp, 3000 ]
         self.ops[ 'dense_var_output' ] = final_output_logits_ta
         # debugging
+        self.ops[ 'predictions' ] = tf.nn.softmax( final_output_logits_ta )
         self.ops[ 'answer' ] = self.placeholders[ 'target_var_ids' ]
-        self.ops[ 'decoder_output_probs' ] = tf.nn.softmax( final_output_logits_ta )
 
         # Produce loss:
         var_correct = tf.nn.sparse_softmax_cross_entropy_with_logits( labels=self.placeholders[ 'target_var_ids' ],
@@ -273,9 +273,9 @@ class SeqDecoder(object):
         token_seq_tensorised.append(end_token_id)
         # HACK: only use one prediction
         #token_seq_mask = [1] * len(token_seq_tensorised)
-        print( "=============================" )
-        print( "replace token mask to 1 " )
-        print( "=============================" )
+        #print( "=============================" )
+        #print( "replace token mask to 1 " )
+        #print( "=============================" )
         #token_seq_mask = [1] * len(token_seq_tensorised)
         token_seq_mask = [1] 
         #padding_size = max_len - len(token_seq_tensorised)
@@ -286,8 +286,8 @@ class SeqDecoder(object):
         assert all(0<=t<len(metadata['decoder_token_vocab']) for t in token_seq_tensorised)
         token_seq_mask = token_seq_mask + [0] * padding_size
 
-        print( "=============target token tensorized:", token_seq_tensorised )
-        print( "=============target token un-tensorized:", sample_token_seq[:max_len - 1] )
+        #print( "=============target token tensorized:", token_seq_tensorised )
+        #print( "=============target token un-tensorized:", sample_token_seq[:max_len - 1] )
         result_holder['target_token_ids'] = np.array(token_seq_tensorised, dtype=np.int32)
         result_holder['target_token_ids_mask'] = np.array(token_seq_mask, dtype=np.int32)
         if not is_train:

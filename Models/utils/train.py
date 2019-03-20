@@ -38,7 +38,7 @@ def run_train(model_class: Type[Model],
               quiet: bool=False) \
         -> RichPath:
     train_data_chunk_paths = train_data_path.get_filtered_files_in_dir('chunk_*')
-    valid_data_chunk_paths = valid_data_path.get_filtered_files_in_dir('chunk_*')
+    valid_data_chunk_paths = valid_data_path.get_filtered_files_in_dir('valid_chunk_*')
 
     model = model_class(hyperparameters, run_name=run_name, model_save_dir=save_folder, log_save_dir=save_folder)
     if os.path.exists(model.model_save_path):
